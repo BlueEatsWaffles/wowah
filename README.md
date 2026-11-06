@@ -1,4 +1,4 @@
-# AI Autoplayer (Geode mod for Geometry Dash 2.2074, PC)
+# AI Autoplayer (Geode mod for Geometry Dash 2.2081, PC)
 
 Puts an **AI** button under the copy button on a level's page. Press it and an AI plays the level until it beats it, then saves the winning run to your PC. A **Replay** button then shows up under it so you can watch the saved run.
 
@@ -46,7 +46,7 @@ To stop the AI, pause and leave the level. Restarting manually also stops it.
 
 ### Option B: build on your PC
 1. Install Visual Studio 2022 (with the "Desktop development with C++" workload), CMake, and the [Geode CLI](https://github.com/geode-sdk/cli/releases) **v3.x**.
-2. Run `geode sdk install`, then `geode sdk install-binaries` (pick **v4.10.2**, the version for GD 2.2074).
+2. Run `geode sdk install`, then `geode sdk install-binaries` (pick **v5.11.2**, the version for GD 2.2081).
 3. In this folder, run:
    ```bash
    geode build
@@ -58,4 +58,4 @@ To stop the AI, pause and leave the level. Restarting manually also stops it.
 - Classic, 1-player levels only. Platformer and 2-player levels are blocked.
 - Hard levels (tight wave sections, lots of 1-frame timings) can take a very long time, or run out of options. In that case, try a lower **Decision Segment** and a higher **Input Positions** value.
 - Practice checkpoints don't restore every trigger perfectly. On some trigger-heavy levels the Replay might desync, and if it does you'll get a message saying at what percent.
-- 2.2074 only. Other GD versions need different bindings and a different Geode version.
+- 2.2081 only (Geode v5.11.2). Other GD versions need different bindings and a different Geode version.

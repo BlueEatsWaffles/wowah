@@ -50,7 +50,7 @@ std::filesystem::path macroPath(GJGameLevel* level) {
     int id = level->m_levelID.value();
     std::string file = id > 0
         ? fmt::format("{}.gdr.json", id)
-        : fmt::format("local_{}.gdr.json", sanitize(level->m_levelName));
+        : fmt::format("local_{}.gdr.json", sanitize(std::string(level->m_levelName)));
     return macroDir() / file;
 }
 
@@ -66,7 +66,7 @@ static std::string serializeMacro(State const& s, int finalTick) {
     out += "  \"author\": \"AI Autoplayer\",\n";
     out += "  \"description\": \"Generated automatically by the AI Autoplayer Geode mod\",\n";
     out += fmt::format("  \"duration\": {:.4f},\n", finalTick / 240.0);
-    out += "  \"gameVersion\": 2.2074,\n";
+    out += "  \"gameVersion\": 2.2081,\n";
     out += "  \"version\": 1.0,\n";
     out += "  \"framerate\": 240,\n";
     out += "  \"seed\": 0,\n";
@@ -182,7 +182,7 @@ static void resetCommon(PlayLayer* pl, Mode mode) {
     s.playIdx = 0;
     s.status = nullptr;
     s.levelID = pl->m_level->m_levelID.value();
-    s.levelName = pl->m_level->m_levelName;
+    s.levelName = std::string(pl->m_level->m_levelName);
 }
 
 // ---------------------------------------------------------------- lifecycle
@@ -216,8 +216,8 @@ void beginPlayback(PlayLayer* pl) {
     auto& s = state();
     resetCommon(pl, Mode::Playback);
 
-    auto text = file::readString(macroPath(pl->m_level));
-    if (!text || !parseMacro(text.unwrap(), s.macro)) {
+    std::string text = file::readString(macroPath(pl->m_level)).unwrapOr(std::string());
+    if (text.empty() || !parseMacro(text, s.macro)) {
         return fail(pl, "Couldn't read the saved AI run for this level.");
     }
     if (Mod::get()->getSettingValue<bool>("playback-practice") && !pl->m_isPracticeMode) {
@@ -249,7 +249,7 @@ void stop(PlayLayer* pl) {
 void fail(PlayLayer* pl, std::string const& reason) {
     if (pl && state().held) sendButton(pl, false, false);
     stop(pl);
-    Notification::create(reason, NotificationIcon::Error, 4.f)->show();
+    Notification::create(reason.c_str(), NotificationIcon::Error, 4.f)->show();
 }
 
 // ---------------------------------------------------------------- search

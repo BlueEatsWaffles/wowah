@@ -18,9 +18,9 @@ class $modify(AIBaseLayer, GJBaseGameLayer) {
     }
 
     // Called once per physics tick (240 per second).
-    void processCommands(float dt) {
+    void processCommands(float dt, bool isHalfTick, bool isLastTick) {
         if (!isAILayer(this) || !m_started || m_levelEndAnimationStarted) {
-            return GJBaseGameLayer::processCommands(dt);
+            return GJBaseGameLayer::processCommands(dt, isHalfTick, isLastTick);
         }
         auto& s = ai::state();
         auto pl = s.layer;
@@ -28,13 +28,13 @@ class $modify(AIBaseLayer, GJBaseGameLayer) {
         if (s.mode == ai::Mode::Search) {
             if (s.dead) return; // frozen until the rewind runs
             ai::searchTick(pl);
-            if (s.mode != ai::Mode::Search) return GJBaseGameLayer::processCommands(dt);
+            if (s.mode != ai::Mode::Search) return GJBaseGameLayer::processCommands(dt, isHalfTick, isLastTick);
         }
         else {
             ai::playbackTick(pl);
         }
 
-        GJBaseGameLayer::processCommands(dt);
+        GJBaseGameLayer::processCommands(dt, isHalfTick, isLastTick);
         s.tick++;
     }
 };

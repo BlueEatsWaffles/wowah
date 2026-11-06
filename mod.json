@@ -1,7 +1,7 @@
 {
-	"geode": "4.10.2",
+	"geode": "5.11.2",
 	"gd": {
-		"win": "2.2074"
+		"win": "2.2081"
 	},
 	"id": "aiautoplayer.ai-autoplayer",
 	"name": "AI Autoplayer",
