@@ -2,6 +2,8 @@
 
 #include <Geode/modify/GJBaseGameLayer.hpp>
 #include <Geode/modify/PlayLayer.hpp>
+#include <algorithm>
+#include <chrono>
 
 using namespace geode::prelude;
 
@@ -17,6 +19,31 @@ class $modify(AIBaseLayer, GJBaseGameLayer) {
         GJBaseGameLayer::handleButton(down, button, isPlayer1);
     }
 
+    // Turbo ("speed hack"): while searching, run as many game updates as fit in the
+    // frame's time budget instead of just one, and rewind immediately on death.
+    void update(float dt) {
+        auto& s = ai::state();
+        if (!isAILayer(this) || s.mode != ai::Mode::Search || !s.turbo) {
+            return GJBaseGameLayer::update(dt);
+        }
+
+        auto start = std::chrono::steady_clock::now();
+        auto budget = std::chrono::milliseconds(std::max(1, s.turboBudgetMs));
+        int loops = 0;
+        while (true) {
+            if (s.dead) ai::onSearchDeath(s.layer);
+            if (!isAILayer(this) || s.mode != ai::Mode::Search) break;
+
+            GJBaseGameLayer::update(1.f / 60.f);
+            loops++;
+
+            if (!isAILayer(this) || m_levelEndAnimationStarted) break;
+            if (loops >= 5000 || std::chrono::steady_clock::now() - start >= budget) break;
+        }
+        // If the AI stopped before running anything, still give the game its normal update.
+        if (loops == 0) GJBaseGameLayer::update(dt);
+    }
+
     // Called once per physics tick (240 per second).
     void processCommands(float dt, bool isHalfTick, bool isLastTick) {
         if (!isAILayer(this) || !m_started || m_levelEndAnimationStarted) {
@@ -29,6 +56,7 @@ class $modify(AIBaseLayer, GJBaseGameLayer) {
             if (s.dead) return; // frozen until the rewind runs
             ai::searchTick(pl);
             if (s.mode != ai::Mode::Search) return GJBaseGameLayer::processCommands(dt, isHalfTick, isLastTick);
+            if (s.dead) return; // this state was already known to be a dead end
         }
         else {
             ai::playbackTick(pl);
@@ -36,6 +64,7 @@ class $modify(AIBaseLayer, GJBaseGameLayer) {
 
         GJBaseGameLayer::processCommands(dt, isHalfTick, isLastTick);
         s.tick++;
+        s.simTicks++;
     }
 };
 
@@ -71,11 +100,8 @@ class $modify(AIPlayLayer, PlayLayer) {
         }
 
         // Search mode: don't actually die, rewind to a checkpoint and try something else.
-        if (m_levelEndAnimationStarted || s.dead) return;
-        s.dead = true;
-        Loader::get()->queueInMainThread([] {
-            if (auto pl = PlayLayer::get()) ai::onSearchDeath(pl);
-        });
+        if (m_levelEndAnimationStarted) return;
+        ai::requestRewind(false);
     }
 
     void resetLevel() {

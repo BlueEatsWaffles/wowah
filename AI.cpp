@@ -3,6 +3,7 @@
 #include <Geode/utils/file.hpp>
 #include <Geode/ui/Notification.hpp>
 #include <algorithm>
+#include <bit>
 #include <cctype>
 #include <cstdlib>
 
@@ -72,7 +73,7 @@ static std::string serializeMacro(State const& s, int finalTick) {
     out += "  \"seed\": 0,\n";
     out += "  \"coins\": 0,\n";
     out += "  \"ldm\": false,\n";
-    out += "  \"bot\": { \"name\": \"AI Autoplayer\", \"version\": \"1.0.0\" },\n";
+    out += "  \"bot\": { \"name\": \"AI Autoplayer\", \"version\": \"1.1.0\" },\n";
     out += fmt::format("  \"level\": {{ \"id\": {}, \"name\": \"{}\" }},\n", s.levelID, jsonEscape(s.levelName));
     out += fmt::format("  \"attempts\": {},\n", s.attempts + 1);
     out += "  \"inputs\": [\n";
@@ -116,24 +117,69 @@ static bool parseMacro(std::string const& text, std::vector<Input>& out) {
 
 // ---------------------------------------------------------------- helpers
 
-static std::vector<Pattern> makePatterns(bool heldAtStart, int len, int resolution) {
+// Candidate inputs for one segment. Coarse timings first (cheap, usually enough),
+// then every remaining tick for when precision is needed.
+static std::vector<Pattern> makePatterns(bool heldAtStart, int len, int resolution, int fineStep) {
     std::vector<Pattern> out;
-    int step = std::max(1, len / std::max(1, resolution));
-    int tap = std::clamp(step / 2, 1, 6);
+    resolution = std::clamp(resolution, 1, len);
+    int coarseStep = std::max(1, len / resolution);
+    constexpr int tap = 2;
 
-    // 1. keep doing what we're doing (nothing, or keep holding)
-    out.push_back({});
-    // 2. short pulse (a tap, or a brief release while holding) at different moments
-    for (int k = 0; k < resolution; k++) {
-        int o = k * step;
-        if (o + tap < len) out.push_back({{o, !heldAtStart}, {o + tap, heldAtStart}});
+    std::vector<int> coarse;
+    for (int o = 0; o < len && static_cast<int>(coarse.size()) < resolution; o += coarseStep) coarse.push_back(o);
+
+    std::vector<int> fine;
+    if (fineStep > 0) {
+        for (int o = 0; o < len; o += fineStep) {
+            if (std::find(coarse.begin(), coarse.end(), o) == coarse.end()) fine.push_back(o);
+        }
     }
-    // 3. switch state (start holding / let go) at different moments
-    for (int k = 0; k < resolution; k++) {
-        int o = k * step;
-        if (o < len) out.push_back({{o, !heldAtStart}});
+
+    // keep doing what we're doing (nothing, or keep holding)
+    out.push_back({});
+    for (auto const* offsets : {&coarse, &fine}) {
+        // short pulse: a tap, or a brief release while holding
+        for (int o : *offsets) out.push_back({{o, !heldAtStart}, {o + tap, heldAtStart}});
+        // switch state: start holding / let go
+        for (int o : *offsets) out.push_back({{o, !heldAtStart}});
     }
     return out;
+}
+
+static uint64_t mix(uint64_t h, uint64_t v) {
+    h ^= v + 0x9e3779b97f4a7c15ULL + (h << 6) + (h >> 2);
+    return h;
+}
+
+static uint64_t hashPlayer(uint64_t h, PlayerObject* p) {
+    if (!p) return mix(h, 0x1234);
+    h = mix(h, std::bit_cast<uint32_t>(p->m_position.x));
+    h = mix(h, std::bit_cast<uint32_t>(p->m_position.y));
+    h = mix(h, std::bit_cast<uint64_t>(p->m_yVelocity));
+    h = mix(h, std::bit_cast<uint32_t>(p->m_vehicleSize));
+    h = mix(h, std::bit_cast<uint32_t>(p->m_playerSpeed));
+    h = mix(h, std::bit_cast<uint32_t>(p->m_gravityMod));
+    uint32_t flags = 0;
+    int bit = 0;
+    for (bool b : {
+        p->m_isShip, p->m_isBird, p->m_isBall, p->m_isDart, p->m_isRobot, p->m_isSpider,
+        p->m_isSwing, p->m_isUpsideDown, p->m_isOnGround, p->m_isOnSlope, p->m_wasOnSlope,
+        p->m_isDashing, p->m_isSideways, p->m_isGoingLeft, p->m_jumpBuffered,
+        p->m_touchedRing, p->m_stateRingJump, p->m_ringJumpRelated, p->m_isAccelerating,
+    }) {
+        if (b) flags |= 1u << bit;
+        bit++;
+    }
+    return mix(h, flags);
+}
+
+static uint64_t hashState(PlayLayer* pl) {
+    auto& s = state();
+    uint64_t h = mix(0xA1A1A1A1ULL, static_cast<uint64_t>(s.tick));
+    h = mix(h, s.held ? 1 : 0);
+    h = hashPlayer(h, pl->m_player1);
+    if (pl->m_gameState.m_isDualMode) h = hashPlayer(h, pl->m_player2);
+    return h;
 }
 
 static void sendButton(PlayLayer* pl, bool down, bool record) {
@@ -163,12 +209,18 @@ static void addStatus(PlayLayer* pl, std::string const& text) {
     pl->addChild(s.status, 9999);
 }
 
-static void resetCommon(PlayLayer* pl, Mode mode) {
+static void releaseStack() {
     auto& s = state();
     for (auto& seg : s.stack) {
         if (seg.checkpoint) seg.checkpoint->release();
     }
     s.stack.clear();
+}
+
+static void resetCommon(PlayLayer* pl, Mode mode) {
+    auto& s = state();
+    releaseStack();
+    s.deadStates.clear();
     s.macro.clear();
     s.mode = mode;
     s.layer = pl;
@@ -177,8 +229,15 @@ static void resetCommon(PlayLayer* pl, Mode mode) {
     s.injecting = false;
     s.ourReset = false;
     s.dead = false;
+    s.pruneDeath = false;
     s.attempts = 0;
+    s.pruned = 0;
     s.bestPercent = 0.f;
+    s.simTicks = 0;
+    s.lastSimTicks = 0;
+    s.lastRateTime = std::chrono::steady_clock::now();
+    s.lastStatusTime = {};
+    s.speedFactor = 0.f;
     s.playIdx = 0;
     s.status = nullptr;
     s.levelID = pl->m_level->m_levelID.value();
@@ -195,11 +254,16 @@ void beginSearch(PlayLayer* pl) {
         return fail(pl, "AI Autoplayer doesn't support platformer levels.");
     }
 
-    s.segLen = static_cast<int>(Mod::get()->getSettingValue<int64_t>("segment-ticks"));
-    int res = static_cast<int>(Mod::get()->getSettingValue<int64_t>("input-resolution"));
-    s.maxAttempts = static_cast<int>(Mod::get()->getSettingValue<int64_t>("max-attempts"));
-    s.patternsReleased = makePatterns(false, s.segLen, res);
-    s.patternsHeld = makePatterns(true, s.segLen, res);
+    auto mod = Mod::get();
+    s.segLen = static_cast<int>(mod->getSettingValue<int64_t>("segment-ticks"));
+    int res = static_cast<int>(mod->getSettingValue<int64_t>("input-resolution"));
+    int fineStep = mod->getSettingValue<bool>("fine-timing") ? 1 : 0;
+    s.maxAttempts = static_cast<int>(mod->getSettingValue<int64_t>("max-attempts"));
+    s.turbo = mod->getSettingValue<bool>("turbo");
+    s.turboBudgetMs = static_cast<int>(mod->getSettingValue<int64_t>("turbo-budget-ms"));
+    s.skipRepeats = mod->getSettingValue<bool>("skip-repeats");
+    s.patternsReleased = makePatterns(false, s.segLen, res, fineStep);
+    s.patternsHeld = makePatterns(true, s.segLen, res, fineStep);
 
     // Practice mode gives us checkpoints to rewind to, and means the AI's
     // run never counts as a real completion on your account.
@@ -208,7 +272,8 @@ void beginSearch(PlayLayer* pl) {
         return fail(pl, "Couldn't enable practice mode, AI stopped.");
     }
 
-    setSpeed(static_cast<float>(Mod::get()->getSettingValue<double>("sim-speed")));
+    // Turbo runs extra game updates itself, so the normal game speed stays at 1x.
+    setSpeed(s.turbo ? 1.f : static_cast<float>(mod->getSettingValue<double>("sim-speed")));
     addStatus(pl, "AI starting...");
 }
 
@@ -229,10 +294,8 @@ void beginPlayback(PlayLayer* pl) {
 
 void stop(PlayLayer* pl) {
     auto& s = state();
-    for (auto& seg : s.stack) {
-        if (seg.checkpoint) seg.checkpoint->release();
-    }
-    s.stack.clear();
+    releaseStack();
+    s.deadStates.clear();
     if (s.status) {
         s.status->removeFromParent();
         s.status = nullptr;
@@ -254,6 +317,19 @@ void fail(PlayLayer* pl, std::string const& reason) {
 
 // ---------------------------------------------------------------- search
 
+void requestRewind(bool prune) {
+    auto& s = state();
+    if (s.dead) return;
+    s.dead = true;
+    s.pruneDeath = prune;
+    // In turbo mode the update loop rewinds right away; otherwise do it next frame.
+    if (!s.turbo) {
+        Loader::get()->queueInMainThread([] {
+            if (auto pl = PlayLayer::get()) onSearchDeath(pl);
+        });
+    }
+}
+
 void searchTick(PlayLayer* pl) {
     auto& s = state();
 
@@ -266,11 +342,17 @@ void searchTick(PlayLayer* pl) {
         needNew = age >= s.segLen && (!s.held || age >= s.segLen * 4);
     }
     if (needNew) {
+        uint64_t h = hashState(pl);
+        if (s.skipRepeats && !s.stack.empty() && s.deadStates.contains(h)) {
+            // Some other input sequence already reached exactly this state and it
+            // went nowhere, so don't waste time playing it out again.
+            return requestRewind(true);
+        }
         auto arr = pl->m_checkpointArray;
         auto cp = pl->markCheckpoint();
         if (cp && arr && arr->containsObject(cp)) {
             cp->retain();
-            s.stack.push_back({s.tick, s.held, 0, s.macro.size(), cp});
+            s.stack.push_back({s.tick, s.held, 0, s.macro.size(), cp, h});
         }
     }
     if (s.stack.empty()) return;
@@ -287,21 +369,29 @@ void onSearchDeath(PlayLayer* pl) {
     auto& s = state();
     if (s.mode != Mode::Search || s.layer != pl || !s.dead) return;
 
-    s.attempts++;
-    s.bestPercent = std::max(s.bestPercent, pl->getCurrentPercent());
-    if (s.attempts >= s.maxAttempts) {
-        return fail(pl, fmt::format("AI gave up after {} attempts (best {:.0f}%).", s.attempts, s.bestPercent));
+    if (s.pruneDeath) {
+        s.pruned++;
     }
+    else {
+        s.attempts++;
+        s.bestPercent = std::max(s.bestPercent, pl->getCurrentPercent());
+        if (s.attempts >= s.maxAttempts) {
+            return fail(pl, fmt::format("AI gave up after {} attempts (best {:.0f}%).", s.attempts, s.bestPercent));
+        }
+    }
+    s.pruneDeath = false;
 
     if (s.held) sendButton(pl, false, false);
 
-    // Try the next pattern for the newest segment; if it has none left, drop that
-    // segment and move on to the next pattern of the one before it.
+    // Try the next pattern for the newest segment; if it has none left, that segment's
+    // start state is a dead end: remember it, drop the segment, and move on to the next
+    // pattern of the one before it.
     while (!s.stack.empty()) {
         auto& seg = s.stack.back();
         seg.pattern++;
         auto const& pats = seg.heldAtStart ? s.patternsHeld : s.patternsReleased;
         if (seg.pattern < static_cast<int>(pats.size())) break;
+        if (s.skipRepeats) s.deadStates.insert(seg.startHash);
         if (seg.checkpoint) seg.checkpoint->release();
         s.stack.pop_back();
     }
@@ -355,6 +445,7 @@ void onLevelComplete(PlayLayer* pl) {
     if (s.mode != Mode::Search) return;
 
     int attempts = s.attempts + 1;
+    int pruned = s.pruned;
     int finalTick = s.tick;
     auto path = macroPath(pl->m_level);
     (void)file::createDirectoryAll(macroDir());
@@ -367,8 +458,9 @@ void onLevelComplete(PlayLayer* pl) {
     }
 
     auto msg = fmt::format(
-        "The AI beat this level in <cy>{}</c> attempts.\n\nSaved run:\n<cg>{}</c>\n\nUse the replay button on the level page to watch it.",
-        attempts, path.string()
+        "The AI beat this level in <cy>{}</c> attempts (and skipped <cl>{}</c> repeats).\n\n"
+        "Saved run:\n<cg>{}</c>\n\nUse the replay button on the level page to watch it.",
+        attempts, pruned, path.string()
     );
     Loader::get()->queueInMainThread([msg] {
         createQuickPopup("AI Finished!", msg, "OK", "Open Folder", [](FLAlertLayer*, bool openFolder) {
@@ -380,10 +472,22 @@ void onLevelComplete(PlayLayer* pl) {
 void updateStatus(PlayLayer* pl) {
     auto& s = state();
     if (!s.status) return;
+
+    auto now = std::chrono::steady_clock::now();
+    if (now - s.lastStatusTime < std::chrono::milliseconds(100)) return;
+    s.lastStatusTime = now;
+
+    float secs = std::chrono::duration<float>(now - s.lastRateTime).count();
+    if (secs >= 0.5f) {
+        s.speedFactor = static_cast<float>(s.simTicks - s.lastSimTicks) / 240.f / secs;
+        s.lastSimTicks = s.simTicks;
+        s.lastRateTime = now;
+    }
+
     if (s.mode == Mode::Search) {
         s.status->setString(fmt::format(
-            "AI solving | attempt {} | {:.0f}% (best {:.0f}%) | depth {}",
-            s.attempts + 1, pl->getCurrentPercent(), s.bestPercent, s.stack.size()
+            "AI solving | attempt {} | skipped {} | {:.0f}% (best {:.0f}%) | {:.0f}x speed",
+            s.attempts + 1, s.pruned, pl->getCurrentPercent(), s.bestPercent, s.speedFactor
         ).c_str());
     }
     else if (s.mode == Mode::Playback) {

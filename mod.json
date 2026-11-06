@@ -5,29 +5,55 @@
 	},
 	"id": "aiautoplayer.ai-autoplayer",
 	"name": "AI Autoplayer",
-	"version": "v1.0.0",
+	"version": "v1.1.0",
 	"developer": "AIAutoplayer",
 	"description": "Adds an AI button to the level page that plays the level until it beats it, then saves the winning run to your PC.",
 	"settings": {
+		"turbo": {
+			"name": "Turbo (Speed Hack)",
+			"description": "While the AI is searching, run as many game updates as fit in each frame and rewind instantly on death. Much faster than normal speed. The saved run is unaffected.",
+			"type": "bool",
+			"default": true
+		},
+		"turbo-budget-ms": {
+			"name": "Turbo Budget (ms per frame)",
+			"description": "How many milliseconds of each frame Turbo spends simulating. Higher = faster AI, but the game window gets choppier.",
+			"type": "int",
+			"default": 12,
+			"min": 2,
+			"max": 40
+		},
+		"skip-repeats": {
+			"name": "Skip Repeated Situations",
+			"description": "Remember every situation (position, speed, gamemode, moment) that led nowhere and skip it instantly if it comes up again. Makes the AI much smarter; only turn it off if it gets stuck in a weird way.",
+			"type": "bool",
+			"default": true
+		},
+		"fine-timing": {
+			"name": "Frame-Perfect Timing",
+			"description": "If none of the normal click timings work, try clicking/releasing on every single physics tick (1/240 s). Needed for tight orbs, waves and frame-perfects.",
+			"type": "bool",
+			"default": true
+		},
 		"segment-ticks": {
 			"name": "Decision Segment (ticks)",
-			"description": "How many physics ticks (240 per second) the AI commits to between checkpoints. Smaller = finer control but slower search.",
+			"description": "How many physics ticks (240 per second) are between the AI's checkpoints. Smaller = finer control and shorter rewinds.",
 			"type": "int",
-			"default": 30,
-			"min": 6,
+			"default": 16,
+			"min": 4,
 			"max": 240
 		},
 		"input-resolution": {
-			"name": "Input Positions per Segment",
-			"description": "How many different moments inside each segment the AI tries clicking/releasing at. Higher = more precise timing, but much slower.",
+			"name": "Quick Timings per Segment",
+			"description": "How many click moments per segment the AI tries first, before falling back to frame-perfect timing.",
 			"type": "int",
-			"default": 3,
+			"default": 4,
 			"min": 1,
-			"max": 8
+			"max": 16
 		},
 		"sim-speed": {
-			"name": "AI Game Speed",
-			"description": "Speeds the game up while the AI is searching (1 = normal speed). The saved run is unaffected.",
+			"name": "Game Speed (when Turbo is off)",
+			"description": "Speeds the game up while the AI is searching if Turbo is turned off (1 = normal speed).",
 			"type": "float",
 			"default": 4.0,
 			"min": 1.0,
@@ -35,11 +61,11 @@
 		},
 		"max-attempts": {
 			"name": "Max Attempts",
-			"description": "The AI gives up after this many deaths.",
+			"description": "The AI gives up after this many deaths (skipped repeats don't count).",
 			"type": "int",
-			"default": 50000,
+			"default": 200000,
 			"min": 100,
-			"max": 10000000
+			"max": 100000000
 		},
 		"playback-practice": {
 			"name": "Replay in Practice Mode",
@@ -49,7 +75,7 @@
 		},
 		"show-status": {
 			"name": "Show AI Status",
-			"description": "Show the attempt counter and progress while the AI plays.",
+			"description": "Show the attempt counter, progress and speed while the AI plays.",
 			"type": "bool",
 			"default": true
 		}
