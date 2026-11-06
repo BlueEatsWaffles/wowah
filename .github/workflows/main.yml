@@ -18,7 +18,7 @@ jobs:
           cli: v3.9.0
           target: Win64
           combine: true
-          bindings-ref: 5129d7d6dc7a1b7d6770a8a422e1b5266bed704e
+          bindings-ref: 1012fcb37243286184d319404b15fd929098fd47
           configure-args: -DSKIP_BUILDING_CODEGEN=OFF
 
   package:
