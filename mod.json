@@ -1,0 +1,57 @@
+{
+	"geode": "4.10.2",
+	"gd": {
+		"win": "2.2074"
+	},
+	"id": "aiautoplayer.ai-autoplayer",
+	"name": "AI Autoplayer",
+	"version": "v1.0.0",
+	"developer": "AIAutoplayer",
+	"description": "Adds an AI button to the level page that plays the level until it beats it, then saves the winning run to your PC.",
+	"settings": {
+		"segment-ticks": {
+			"name": "Decision Segment (ticks)",
+			"description": "How many physics ticks (240 per second) the AI commits to between checkpoints. Smaller = finer control but slower search.",
+			"type": "int",
+			"default": 30,
+			"min": 6,
+			"max": 240
+		},
+		"input-resolution": {
+			"name": "Input Positions per Segment",
+			"description": "How many different moments inside each segment the AI tries clicking/releasing at. Higher = more precise timing, but much slower.",
+			"type": "int",
+			"default": 3,
+			"min": 1,
+			"max": 8
+		},
+		"sim-speed": {
+			"name": "AI Game Speed",
+			"description": "Speeds the game up while the AI is searching (1 = normal speed). The saved run is unaffected.",
+			"type": "float",
+			"default": 4.0,
+			"min": 1.0,
+			"max": 16.0
+		},
+		"max-attempts": {
+			"name": "Max Attempts",
+			"description": "The AI gives up after this many deaths.",
+			"type": "int",
+			"default": 50000,
+			"min": 100,
+			"max": 10000000
+		},
+		"playback-practice": {
+			"name": "Replay in Practice Mode",
+			"description": "Play saved AI runs back in practice mode so they never count as a real completion (recommended).",
+			"type": "bool",
+			"default": true
+		},
+		"show-status": {
+			"name": "Show AI Status",
+			"description": "Show the attempt counter and progress while the AI plays.",
+			"type": "bool",
+			"default": true
+		}
+	}
+}
